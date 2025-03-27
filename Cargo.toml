@@ -1,0 +1,15 @@
+[package]
+name = "openpsg-serial"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+description = "OpenPSG single wire serial protocol"
+
+[dependencies]
+crc = "3.2"
+defmt = { version = "0.3", optional = true }
+heapless = "0.8"
+
+[features]
+default = []
+defmt = ["dep:defmt", "heapless/defmt-03"]

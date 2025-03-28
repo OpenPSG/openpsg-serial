@@ -27,13 +27,14 @@
 //!
 //! ## Commands
 //!
-//! | Command | Code | Description              | Payload Format              |
-//! |---------|------|--------------------------|-----------------------------|
-//! | Reset   | 0x00 | Resets the device        | None                        |
-//! | Ping    | 0x01 | Health check             | None                        |
-//! | Read    | 0x02 | Reads from a register    | [`ReadPayload`]             |
-//! | Write   | 0x03 | Writes to a register     | [`DataPayload`]             |
-//! | Time    | 0x04 | Sets the system time     | [`TimePayload`]             |
+//! | Command  | Code | Description                      | Payload Format      |
+//! |----------|------|----------------------------------|---------------------|
+//! | Reset    | 0x00 | Resets the device                | None                |
+//! | Ping     | 0x01 | Health check                     | None                |
+//! | Read     | 0x02 | Reads from a register            | [`ReadPayload`]     |
+//! | Write    | 0x03 | Writes to a register             | [`DataPayload`]     |
+//! | SetTime  | 0x04 | Sets the system time             | [`TimePayload`]     |
+//! | ReadMany | 0x05 | Read multiple values from a FIFO | [`ReadManyPayload`] |
 //!
 //! Responses to `Read` and `Write` commands may also use [`DataPayload`] as a payload.
 //!
@@ -88,11 +89,14 @@
 
 #![cfg_attr(not(test), no_std)]
 
+use bitflags::bitflags;
 use core::convert::TryFrom;
 use crc::{CRC_16_MODBUS, Crc};
 use heapless::Vec;
 
-pub const MAX_MESSAGE_SIZE: usize = 256;
+pub const MAX_MESSAGE_SIZE: usize = 256; // Total including all fields
+pub const MESSAGE_HEADER_SIZE: usize = 10; // Address (8) + Flags (1) + Command (1)
+pub const MAX_PAYLOAD_SIZE: usize = MAX_MESSAGE_SIZE - MESSAGE_HEADER_SIZE;
 
 const CRC16: Crc<u16> = Crc::<u16>::new(&CRC_16_MODBUS);
 
@@ -115,7 +119,9 @@ pub enum Command {
     /// Write to a register
     Write = 0x03,
     /// Set the system time
-    Time = 0x04,
+    SetTime = 0x04,
+    /// Read multiple values from a FIFO
+    ReadMany = 0x05,
 }
 
 impl TryFrom<u8> for Command {
@@ -126,6 +132,8 @@ impl TryFrom<u8> for Command {
             0x01 => Ok(Command::Ping),
             0x02 => Ok(Command::Read),
             0x03 => Ok(Command::Write),
+            0x04 => Ok(Command::SetTime),
+            0x05 => Ok(Command::ReadMany),
             _ => Err("Invalid command code"),
         }
     }
@@ -137,18 +145,13 @@ impl From<Command> for u8 {
     }
 }
 
-/// Message flags
-#[repr(u8)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub enum Flag {
-    Response = 0x80,
-    Error = 0x40,
-}
-
-impl From<Flag> for u8 {
-    fn from(flag: Flag) -> Self {
-        flag as u8
+bitflags! {
+    /// Message flags
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+    pub struct Flags: u8 {
+        const RESPONSE = 0x80;
+        const ERROR    = 0x40;
     }
 }
 
@@ -209,7 +212,7 @@ pub struct Message {
     pub address: Address,
     pub flags: u8,
     pub command: Command,
-    pub data: Vec<u8, { MAX_MESSAGE_SIZE - 10 }>,
+    pub data: Vec<u8, MAX_PAYLOAD_SIZE>,
 }
 
 impl Message {
@@ -243,12 +246,12 @@ impl Message {
 
     /// Check if this message is a request
     pub fn is_request(&self) -> bool {
-        self.flags & (Flag::Response as u8) == 0
+        !self.is_response()
     }
 
     /// Check if this message is a response
     pub fn is_response(&self) -> bool {
-        self.flags & (Flag::Response as u8) != 0
+        Flags::from_bits_truncate(self.flags).contains(Flags::RESPONSE)
     }
 }
 
@@ -260,7 +263,7 @@ impl TryFrom<&[u8]> for Message {
         let mut raw = [0u8; MAX_MESSAGE_SIZE];
         let len = unescape(input, &mut raw)?;
 
-        if len < 10 {
+        if len < MESSAGE_HEADER_SIZE {
             return Err("Too short");
         }
 
@@ -269,8 +272,7 @@ impl TryFrom<&[u8]> for Message {
         let command = Command::try_from(raw[9])?;
 
         let data_len = len - 10;
-        let data: Vec<u8, { MAX_MESSAGE_SIZE - 10 }> =
-            Vec::from_slice(&raw[10..10 + data_len]).unwrap();
+        let data: Vec<u8, MAX_PAYLOAD_SIZE> = Vec::from_slice(&raw[10..10 + data_len]).unwrap();
 
         Ok(Message {
             address,
@@ -393,7 +395,7 @@ impl TryFrom<u8> for ErrorCode {
     }
 }
 
-pub const EMPTY_PAYLOAD: Vec<u8, { MAX_MESSAGE_SIZE - 10 }> = Vec::new();
+pub const EMPTY_PAYLOAD: Vec<u8, MAX_PAYLOAD_SIZE> = Vec::new();
 
 /// The payload of an error response.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -405,7 +407,7 @@ pub struct ErrorPayload<'a> {
     pub message: &'a str,
 }
 
-impl From<ErrorPayload<'_>> for Vec<u8, { MAX_MESSAGE_SIZE - 10 }> {
+impl From<ErrorPayload<'_>> for Vec<u8, MAX_PAYLOAD_SIZE> {
     fn from(payload: ErrorPayload) -> Self {
         let mut data = Vec::new();
         data.push(payload.code as u8).unwrap();
@@ -451,7 +453,7 @@ impl ReadPayload {
     }
 }
 
-impl From<ReadPayload> for Vec<u8, { MAX_MESSAGE_SIZE - 10 }> {
+impl From<ReadPayload> for Vec<u8, MAX_PAYLOAD_SIZE> {
     fn from(payload: ReadPayload) -> Self {
         let mut data = Vec::new();
         data.extend_from_slice(&payload.register.to_be_bytes())
@@ -484,7 +486,7 @@ pub struct DataPayload<'a> {
     pub value: &'a [u8],
 }
 
-impl From<DataPayload<'_>> for Vec<u8, { MAX_MESSAGE_SIZE - 10 }> {
+impl From<DataPayload<'_>> for Vec<u8, MAX_PAYLOAD_SIZE> {
     fn from(payload: DataPayload) -> Self {
         let mut data = Vec::new();
         data.extend_from_slice(&payload.register.to_be_bytes())
@@ -509,6 +511,42 @@ impl<'a> TryFrom<&'a [u8]> for DataPayload<'a> {
     }
 }
 
+/// The payload of a read many request.
+/// This is used to read multiple values from a FIFO.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct ReadManyPayload {
+    /// The register address to read from.
+    pub register: u16,
+    /// The number of values to read.
+    pub count: u16,
+}
+
+impl From<ReadManyPayload> for Vec<u8, MAX_PAYLOAD_SIZE> {
+    fn from(payload: ReadManyPayload) -> Self {
+        let mut data = Vec::new();
+        data.extend_from_slice(&payload.register.to_be_bytes())
+            .unwrap();
+        data.extend_from_slice(&payload.count.to_be_bytes())
+            .unwrap();
+        data
+    }
+}
+impl TryFrom<&[u8]> for ReadManyPayload {
+    type Error = &'static str;
+
+    fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
+        if input.len() != 4 {
+            return Err("Invalid length");
+        }
+
+        Ok(ReadManyPayload {
+            register: u16::from_be_bytes(input[0..2].try_into().unwrap()),
+            count: u16::from_be_bytes(input[2..4].try_into().unwrap()),
+        })
+    }
+}
+
 /// The payload of a time setting request.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -519,7 +557,7 @@ pub struct TimePayload {
     pub microseconds: u32,
 }
 
-impl From<TimePayload> for Vec<u8, { MAX_MESSAGE_SIZE - 10 }> {
+impl From<TimePayload> for Vec<u8, MAX_PAYLOAD_SIZE> {
     fn from(payload: TimePayload) -> Self {
         let mut data = Vec::new();
         data.extend_from_slice(&payload.timestamp.to_be_bytes())

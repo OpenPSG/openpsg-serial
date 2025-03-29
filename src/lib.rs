@@ -89,7 +89,6 @@
 
 #![cfg_attr(not(test), no_std)]
 
-
 use core::convert::TryFrom;
 use crc::{CRC_16_MODBUS, Crc};
 use heapless::Vec;
@@ -152,6 +151,7 @@ impl From<Command> for u8 {
 
 bitflags! {
     /// Message flags
+    #[derive(Debug, Clone, PartialEq)]
     pub struct Flags: u8 {
         const RESPONSE = 0x80;
         const ERROR    = 0x40;
@@ -213,7 +213,7 @@ impl defmt::Format for Address {
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
 pub struct Message {
     pub address: Address,
-    pub flags: u8,
+    pub flags: Flags,
     pub command: Command,
     pub data: Vec<u8, MAX_PAYLOAD_SIZE>,
 }
@@ -227,7 +227,7 @@ impl Message {
         raw[i..i + 8].copy_from_slice(&self.address.0.to_be_bytes());
         i += 8;
 
-        raw[i] = self.flags;
+        raw[i] = self.flags.bits();
         i += 1;
 
         raw[i] = self.command.into();
@@ -249,12 +249,7 @@ impl Message {
 
     /// Check if this message is a request
     pub fn is_request(&self) -> bool {
-        !self.is_response()
-    }
-
-    /// Check if this message is a response
-    pub fn is_response(&self) -> bool {
-        Flags::from_bits_truncate(self.flags).contains(Flags::RESPONSE)
+        !self.flags.contains(Flags::RESPONSE)
     }
 }
 
@@ -271,7 +266,7 @@ impl TryFrom<&[u8]> for Message {
         }
 
         let address = Address(u64::from_be_bytes(raw[0..8].try_into().unwrap()));
-        let flags = raw[8];
+        let flags = Flags::from_bits(raw[8]).ok_or("Invalid flags")?;
         let command = Command::try_from(raw[9])?;
 
         let data_len = len - 10;
@@ -594,7 +589,7 @@ mod tests {
     fn test_encode_decode() {
         let msg = Message {
             address: Address::try_from("00:11:22:33:44:55:66:77").unwrap(),
-            flags: 0, // Request
+            flags: Flags::empty(),
             command: Command::Write,
             data: DataPayload {
                 register: 0x1234,

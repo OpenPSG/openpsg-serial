@@ -152,7 +152,6 @@ impl From<Command> for u8 {
 
 bitflags! {
     /// Message flags
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub struct Flags: u8 {
         const RESPONSE = 0x80;
         const ERROR    = 0x40;

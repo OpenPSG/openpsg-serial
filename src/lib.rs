@@ -151,7 +151,7 @@ impl From<Command> for u8 {
 
 bitflags! {
     /// Message flags
-    #[derive(Debug, Clone, PartialEq)]
+    #[cfg_attr(not(feature = "defmt"), derive(Debug, Clone, PartialEq))]
     pub struct Flags: u8 {
         const RESPONSE = 0x80;
         const ERROR    = 0x40;

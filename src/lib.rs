@@ -89,10 +89,15 @@
 
 #![cfg_attr(not(test), no_std)]
 
-use bitflags::bitflags;
+
 use core::convert::TryFrom;
 use crc::{CRC_16_MODBUS, Crc};
 use heapless::Vec;
+
+#[cfg(not(feature = "defmt"))]
+use bitflags::bitflags;
+#[cfg(feature = "defmt")]
+use defmt::bitflags;
 
 pub const MAX_MESSAGE_SIZE: usize = 256; // Total including all fields
 pub const MESSAGE_HEADER_SIZE: usize = 10; // Address (8) + Flags (1) + Command (1)
@@ -148,7 +153,6 @@ impl From<Command> for u8 {
 bitflags! {
     /// Message flags
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    #[cfg_attr(feature = "defmt", derive(defmt::Format))]
     pub struct Flags: u8 {
         const RESPONSE = 0x80;
         const ERROR    = 0x40;

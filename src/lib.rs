@@ -89,9 +89,9 @@
 
 #![cfg_attr(not(test), no_std)]
 
-use core::convert::TryFrom;
+use core::{convert::TryFrom, str::FromStr};
 use crc::{CRC_16_MODBUS, Crc};
-use heapless::Vec;
+use heapless::{String, Vec};
 
 #[cfg(not(feature = "defmt"))]
 use bitflags::bitflags;
@@ -215,7 +215,7 @@ pub struct Message {
     pub address: Address,
     pub flags: Flags,
     pub command: Command,
-    pub data: Vec<u8, MAX_PAYLOAD_SIZE>,
+    pub payload: Payload,
 }
 
 impl Message {
@@ -233,12 +233,14 @@ impl Message {
         raw[i] = self.command.into();
         i += 1;
 
-        if i + self.data.len() > raw.len() - 2 {
+        let payload: Vec<u8, MAX_PAYLOAD_SIZE> = self.payload.clone().into();
+
+        if i + payload.len() > raw.len() - 2 {
             return Err("Message too long");
         }
 
-        raw[i..i + self.data.len()].copy_from_slice(&self.data);
-        i += self.data.len();
+        raw[i..i + payload.len()].copy_from_slice(&payload[..]);
+        i += payload.len();
 
         let crc = CRC16.checksum(&raw[..i]);
         raw[i..i + 2].copy_from_slice(&crc.to_be_bytes());
@@ -270,13 +272,17 @@ impl TryFrom<&[u8]> for Message {
         let command = Command::try_from(raw[9])?;
 
         let data_len = len - 10;
-        let data: Vec<u8, MAX_PAYLOAD_SIZE> = Vec::from_slice(&raw[10..10 + data_len]).unwrap();
+        let payload = Payload::try_from(
+            command,
+            &flags,
+            &raw[MESSAGE_HEADER_SIZE..MESSAGE_HEADER_SIZE + data_len],
+        )?;
 
         Ok(Message {
             address,
             flags,
             command,
-            data,
+            payload,
         })
     }
 }
@@ -352,6 +358,52 @@ fn unescape(input: &[u8], output: &mut [u8]) -> Result<usize, &'static str> {
     Ok(data_len)
 }
 
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub enum Payload {
+    None,
+    Error(ErrorPayload),
+    Read(ReadPayload),
+    Data(DataPayload),
+    Time(TimePayload),
+    ReadMany(ReadManyPayload),
+}
+
+impl Payload {
+    pub fn try_from(command: Command, flags: &Flags, bytes: &[u8]) -> Result<Self, &'static str> {
+        if flags.contains(Flags::RESPONSE) {
+            match command {
+                Command::Reset | Command::Ping => Ok(Payload::None),
+                Command::Read => Ok(Payload::Data(DataPayload::try_from(bytes)?)),
+                Command::Write => Ok(Payload::None),
+                Command::SetTime => Ok(Payload::None),
+                Command::ReadMany => Ok(Payload::Data(DataPayload::try_from(bytes)?)),
+            }
+        } else {
+            match command {
+                Command::Reset | Command::Ping => Ok(Payload::None),
+                Command::Read => Ok(Payload::Read(ReadPayload::try_from(bytes)?)),
+                Command::Write => Ok(Payload::Data(DataPayload::try_from(bytes)?)),
+                Command::SetTime => Ok(Payload::Time(TimePayload::try_from(bytes)?)),
+                Command::ReadMany => Ok(Payload::ReadMany(ReadManyPayload::try_from(bytes)?)),
+            }
+        }
+    }
+}
+
+impl From<Payload> for Vec<u8, MAX_PAYLOAD_SIZE> {
+    fn from(payload: Payload) -> Self {
+        match payload {
+            Payload::None => Vec::new(),
+            Payload::Error(p) => p.into(),
+            Payload::Read(p) => p.into(),
+            Payload::Data(p) => p.into(),
+            Payload::Time(p) => p.into(),
+            Payload::ReadMany(p) => p.into(),
+        }
+    }
+}
+
 /// Standard error codes
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
@@ -393,19 +445,17 @@ impl TryFrom<u8> for ErrorCode {
     }
 }
 
-pub const EMPTY_PAYLOAD: Vec<u8, MAX_PAYLOAD_SIZE> = Vec::new();
-
 /// The payload of an error response.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct ErrorPayload<'a> {
+pub struct ErrorPayload {
     /// The error code.
     pub code: ErrorCode,
     /// An optional error message.
-    pub message: &'a str,
+    pub message: String<{ MAX_PAYLOAD_SIZE - 1 }>,
 }
 
-impl From<ErrorPayload<'_>> for Vec<u8, MAX_PAYLOAD_SIZE> {
+impl From<ErrorPayload> for Vec<u8, MAX_PAYLOAD_SIZE> {
     fn from(payload: ErrorPayload) -> Self {
         let mut data = Vec::new();
         data.push(payload.code as u8).unwrap();
@@ -414,15 +464,18 @@ impl From<ErrorPayload<'_>> for Vec<u8, MAX_PAYLOAD_SIZE> {
     }
 }
 
-impl<'a> TryFrom<&'a [u8]> for ErrorPayload<'a> {
+impl TryFrom<&[u8]> for ErrorPayload {
     type Error = &'static str;
 
-    fn try_from(input: &'a [u8]) -> Result<Self, Self::Error> {
+    fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
         let code = ErrorCode::try_from(input[0]).map_err(|_| "Invalid error code")?;
 
         Ok(ErrorPayload {
             code,
-            message: core::str::from_utf8(&input[1..]).map_err(|_| "Invalid UTF-8")?,
+            message: String::from_str(
+                core::str::from_utf8(&input[1..]).map_err(|_| "Invalid UTF-8")?,
+            )
+            .map_err(|_| "Error message too long")?,
         })
     }
 }
@@ -475,72 +528,36 @@ impl TryFrom<&[u8]> for ReadPayload {
 }
 
 /// The payload of a write request or the payload of a read response.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct DataPayload<'a> {
+pub struct DataPayload {
     /// The register address to write / that was read from.
     pub register: u16,
     /// The data to write / that was read.
-    pub value: &'a [u8],
+    pub value: Vec<u8, { MAX_PAYLOAD_SIZE - 2 }>,
 }
 
-impl From<DataPayload<'_>> for Vec<u8, MAX_PAYLOAD_SIZE> {
+impl From<DataPayload> for Vec<u8, MAX_PAYLOAD_SIZE> {
     fn from(payload: DataPayload) -> Self {
         let mut data = Vec::new();
         data.extend_from_slice(&payload.register.to_be_bytes())
             .unwrap();
-        data.extend_from_slice(payload.value).unwrap();
+        data.extend_from_slice(&payload.value[..]).unwrap();
         data
     }
 }
 
-impl<'a> TryFrom<&'a [u8]> for DataPayload<'a> {
+impl TryFrom<&[u8]> for DataPayload {
     type Error = &'static str;
 
-    fn try_from(input: &'a [u8]) -> Result<Self, Self::Error> {
+    fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
         if input.len() < 3 {
             return Err("Invalid length");
         }
 
         Ok(DataPayload {
             register: u16::from_be_bytes(input[0..2].try_into().unwrap()),
-            value: &input[2..],
-        })
-    }
-}
-
-/// The payload of a read many request.
-/// This is used to read multiple values from a FIFO.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(feature = "defmt", derive(defmt::Format))]
-pub struct ReadManyPayload {
-    /// The register address to read from.
-    pub register: u16,
-    /// The number of values to read.
-    pub count: u16,
-}
-
-impl From<ReadManyPayload> for Vec<u8, MAX_PAYLOAD_SIZE> {
-    fn from(payload: ReadManyPayload) -> Self {
-        let mut data = Vec::new();
-        data.extend_from_slice(&payload.register.to_be_bytes())
-            .unwrap();
-        data.extend_from_slice(&payload.count.to_be_bytes())
-            .unwrap();
-        data
-    }
-}
-impl TryFrom<&[u8]> for ReadManyPayload {
-    type Error = &'static str;
-
-    fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
-        if input.len() != 4 {
-            return Err("Invalid length");
-        }
-
-        Ok(ReadManyPayload {
-            register: u16::from_be_bytes(input[0..2].try_into().unwrap()),
-            count: u16::from_be_bytes(input[2..4].try_into().unwrap()),
+            value: Vec::from_slice(&input[2..]).map_err(|_| "Data too large")?,
         })
     }
 }
@@ -581,6 +598,43 @@ impl TryFrom<&[u8]> for TimePayload {
     }
 }
 
+/// The payload of a read many request.
+/// This is used to read multiple values from a FIFO.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(defmt::Format))]
+pub struct ReadManyPayload {
+    /// The register address to read from.
+    pub register: u16,
+    /// The number of values to read.
+    pub count: u16,
+}
+
+impl From<ReadManyPayload> for Vec<u8, MAX_PAYLOAD_SIZE> {
+    fn from(payload: ReadManyPayload) -> Self {
+        let mut data = Vec::new();
+        data.extend_from_slice(&payload.register.to_be_bytes())
+            .unwrap();
+        data.extend_from_slice(&payload.count.to_be_bytes())
+            .unwrap();
+        data
+    }
+}
+
+impl TryFrom<&[u8]> for ReadManyPayload {
+    type Error = &'static str;
+
+    fn try_from(input: &[u8]) -> Result<Self, Self::Error> {
+        if input.len() != 4 {
+            return Err("Invalid length");
+        }
+
+        Ok(ReadManyPayload {
+            register: u16::from_be_bytes(input[0..2].try_into().unwrap()),
+            count: u16::from_be_bytes(input[2..4].try_into().unwrap()),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -591,11 +645,10 @@ mod tests {
             address: Address::try_from("00:11:22:33:44:55:66:77").unwrap(),
             flags: Flags::empty(),
             command: Command::Write,
-            data: DataPayload {
+            payload: Payload::Data(DataPayload {
                 register: 0x1234,
-                value: &[0x01, 0x02, 0x03],
-            }
-            .into(),
+                value: Vec::from_slice(&[0x01, 0x02, 0x03]).unwrap(),
+            }),
         };
 
         let mut buffer = [0u8; MAX_MESSAGE_SIZE];

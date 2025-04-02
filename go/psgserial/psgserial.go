@@ -506,7 +506,7 @@ func (p *ReadPayload) UnmarshalBinary(data []byte) error {
 }
 
 func (p *ReadPayload) String() string {
-	return fmt.Sprintf("ReadPayload{Register:%04X}", p.Register)
+	return fmt.Sprintf("ReadPayload{Register:0x%04X}", p.Register)
 }
 
 // The payload of a write request or the payload of a read response.
@@ -535,9 +535,9 @@ func (p *DataPayload) UnmarshalBinary(data []byte) error {
 
 func (p *DataPayload) String() string {
 	if len(p.Value) == 0 {
-		return fmt.Sprintf("DataPayload{Register:%04X}", p.Register)
+		return fmt.Sprintf("DataPayload{Register:0x%04X}", p.Register)
 	}
-	return fmt.Sprintf("DataPayload{Register:%04X Value:% X}", p.Register, p.Value)
+	return fmt.Sprintf("DataPayload{Register:0x%04X Value:%v}", p.Register, p.Value)
 }
 
 // The payload of a time setting request.
@@ -602,5 +602,5 @@ func (p *ReadManyPayload) UnmarshalBinary(data []byte) error {
 }
 
 func (p *ReadManyPayload) String() string {
-	return fmt.Sprintf("ReadManyPayload{Register:%04X Count:%d}", p.Register, p.Count)
+	return fmt.Sprintf("ReadManyPayload{Register:0x%04X Count:%d}", p.Register, p.Count)
 }

@@ -148,6 +148,16 @@ const (
 func (f Flags) IsResponse() bool { return f&FlagsResponse != 0 }
 func (f Flags) IsError() bool    { return f&FlagsError != 0 }
 
+func (f Flags) String() string {
+	if f.IsError() {
+		return "Error"
+	}
+	if f.IsResponse() {
+		return "Response"
+	}
+	return "Request"
+}
+
 // All devices on the network will respond to this address.
 const BroadcastAddress Address = 0xFFFFFFFFFFFFFFFF
 
@@ -327,6 +337,7 @@ func unescape(input []byte) ([]byte, error) {
 type Payload interface {
 	encoding.BinaryMarshaler
 	encoding.BinaryUnmarshaler
+	fmt.Stringer
 }
 
 func unmarshalPayload(command Command, flags Flags, bytes []byte) (Payload, error) {
@@ -402,6 +413,10 @@ func (p *EmptyPayload) UnmarshalBinary([]byte) error {
 	return nil
 }
 
+func (p *EmptyPayload) String() string {
+	return "{}"
+}
+
 // Standard error codes.
 type ErrorCode byte
 
@@ -448,8 +463,19 @@ func (p *ErrorPayload) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// / Well known registers
-// / These are common registers that should be implemented by all devices.
+func (p *ErrorPayload) String() string {
+	if p.Message == "" {
+		return fmt.Sprintf("ErrorPayload{Code: %02X}", byte(p.Code))
+	}
+	return fmt.Sprintf("ErrorPayload{Code:%02X Message:%s}", byte(p.Code), p.Message)
+}
+
+func (p *ErrorPayload) Error() error {
+	return fmt.Errorf("code: %02X, message: %s", byte(p.Code), p.Message)
+}
+
+// Well known registers
+// These are common registers that should be implemented by all devices.
 const (
 	REGISTER_VENDOR_ID        uint16 = 0x0000 // 16-bit vendor id
 	REGISTER_PRODUCT_ID       uint16 = 0x0001 // 16-bit product id
@@ -479,6 +505,10 @@ func (p *ReadPayload) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+func (p *ReadPayload) String() string {
+	return fmt.Sprintf("ReadPayload{Register:%04X}", p.Register)
+}
+
 // The payload of a write request or the payload of a read response.
 type DataPayload struct {
 	// The register address to write / that was read from.
@@ -501,6 +531,13 @@ func (p *DataPayload) UnmarshalBinary(data []byte) error {
 	p.Register = binary.BigEndian.Uint16(data[:2])
 	p.Value = data[2:]
 	return nil
+}
+
+func (p *DataPayload) String() string {
+	if len(p.Value) == 0 {
+		return fmt.Sprintf("DataPayload{Register:%04X}", p.Register)
+	}
+	return fmt.Sprintf("DataPayload{Register:%04X Value:% X}", p.Register, p.Value)
 }
 
 // The payload of a time setting request.
@@ -531,6 +568,10 @@ func (p *TimePayload) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
+func (p *TimePayload) String() string {
+	return fmt.Sprintf("TimePayload{Timestamp:%d Microseconds:%d}", p.Timestamp, p.Microseconds)
+}
+
 // The payload of a read many request.
 // This is used to read multiple values from a FIFO.
 type ReadManyPayload struct {
@@ -558,4 +599,8 @@ func (p *ReadManyPayload) UnmarshalBinary(data []byte) error {
 	p.Register = binary.BigEndian.Uint16(data[:2])
 	p.Count = binary.BigEndian.Uint16(data[2:4])
 	return nil
+}
+
+func (p *ReadManyPayload) String() string {
+	return fmt.Sprintf("ReadManyPayload{Register:%04X Count:%d}", p.Register, p.Count)
 }

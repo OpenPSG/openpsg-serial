@@ -89,7 +89,7 @@ dependencies = [
 
 [[package]]
 name = "openpsg-serial"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "bitflags 2.9.0",
  "crc",

@@ -161,7 +161,7 @@ bitflags! {
 /// All devices on the network will respond to this address.
 pub const BROADCAST_ADDRESS: Address = Address(0xFFFFFFFFFFFFFFFF);
 
-/// An OpenPSG serial address
+/// An OpenPSG device address
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Address(pub u64);
 
@@ -371,12 +371,14 @@ pub enum Payload {
 
 impl Payload {
     pub fn try_from(command: Command, flags: &Flags, bytes: &[u8]) -> Result<Self, &'static str> {
+        if flags.contains(Flags::ERROR) {
+            return Ok(Payload::Error(ErrorPayload::try_from(bytes)?));
+        }
+
         if flags.contains(Flags::RESPONSE) {
             match command {
-                Command::Reset | Command::Ping => Ok(Payload::None),
+                Command::Reset | Command::Ping | Command::Write | Command::SetTime => Ok(Payload::None),
                 Command::Read => Ok(Payload::Data(DataPayload::try_from(bytes)?)),
-                Command::Write => Ok(Payload::None),
-                Command::SetTime => Ok(Payload::None),
                 Command::ReadMany => Ok(Payload::Data(DataPayload::try_from(bytes)?)),
             }
         } else {
@@ -485,7 +487,7 @@ impl TryFrom<&[u8]> for ErrorPayload {
 pub const REGISTER_VENDOR_ID: u16 = 0x0000; // 16-bit vendor id
 pub const REGISTER_PRODUCT_ID: u16 = 0x0001; // 16-bit product id
 pub const REGISTER_DEVICE_NAME: u16 = 0x0002; // UTF-8 device name
-pub const REGISTER_FIRMWARE_VERSION: u16 = 0x0003; // 16-bit firmware version
+pub const REGISTER_FIRMWARE_VERSION: u16 = 0x0003; // UTF-8 firmware version
 
 /// Start of device-specific registers
 pub const REGISTER_DEVICE_START: u16 = 0x1000;

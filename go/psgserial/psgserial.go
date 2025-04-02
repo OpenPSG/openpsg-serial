@@ -1,3 +1,92 @@
+// Package psgserial implements the OpenPSG serial format.
+//
+// The OpenPSG serial protocol consists of the following message structure:
+//
+// | Field      | Size (bytes) | Description                                |
+// |-----------|-------------|----------------------------------------------|
+// | Address   | 8           | Unique identifier for the recipient device   |
+// | Flags     | 1           | Message flags (e.g., request/response)       |
+// | Command   | 1           | Command identifier                           |
+// | Data      | N           | Variable-length payload data                 |
+// | CRC       | 2           | CRC-16 checksum for integrity validation     |
+// | END       | 1           | Message delimiter                            |
+//
+// - The message is encoded in big-endian format.
+// - The CRC is computed over all fields except the CRC itself.
+// - Flags indicate whether the message is a request (0) or a response (0x80).
+// - Commands define specific operations, such as reading/writing registers.
+// - The END byte (0xC0) is used as a message delimiter.
+//
+// ## Escaping
+//
+// To avoid confusion with the `END` and `ESC` bytes during transmission, those
+// values are escaped:
+//
+// - `END (0xC0)` becomes `ESC (0xDB) + ESC_END (0xDC)`
+// - `ESC (0xDB)` becomes `ESC (0xDB) + ESC_ESC (0xDD)`
+//
+// ## Commands
+//
+// | Command  | Code | Description                      | Payload Format      |
+// |----------|------|----------------------------------|---------------------|
+// | Reset    | 0x00 | Resets the device                | None                |
+// | Ping     | 0x01 | Health check                     | None                |
+// | Read     | 0x02 | Reads from a register            | [`ReadPayload`]     |
+// | Write    | 0x03 | Writes to a register             | [`DataPayload`]     |
+// | SetTime  | 0x04 | Sets the system time             | [`TimePayload`]     |
+// | ReadMany | 0x05 | Read multiple values from a FIFO | [`ReadManyPayload`] |
+//
+// Responses to `Read` and `Write` commands may also use [`DataPayload`] as a payload.
+//
+// ## Error Handling
+//
+// If a message results in an error, the response will contain:
+//
+// - `Flags::Response | Flags::Error`
+// - `command` equal to the original command
+// - A payload of type [`ErrorPayload`] containing an error code and optional message.
+//
+// ## Payloads
+//
+// ### ErrorPayload
+//
+// This payload contains an error code and an optional error message.
+//
+// | Field    | Size (bytes) | Description              |
+// |----------|--------------|--------------------------|
+// | Code     | 1            | Error code               |
+// | Message  | N            | Optional error message   |
+//
+// ### ReadPayload
+//
+// This payload contains the register address that the sender wants to read from
+//
+// | Field    | Size (bytes) | Description              |
+// |----------|--------------|--------------------------|
+// | Register | 2            | Big-endian register ID   |
+//
+// # DataPayload
+//
+// The payload used for `Write` command requests and `Read` command responses.
+//
+// It includes both the register address and the associated data bytes.
+//
+// | Field    | Size (bytes) | Description              |
+// |----------|--------------|--------------------------|
+// | Register | 2            | Big-endian register ID   |
+// | Value    | N            | Data bytes               |
+//
+// ### TimePayload
+//
+// This payload contains a UTC timestamp in seconds since the Unix epoch
+// and the microseconds part.
+//
+// | Field       | Size (bytes) | Description              |
+// |-------------|--------------|--------------------------|
+// | Timestamp   | 8            | Big-endian timestamp     |
+// | Microseconds| 4            | Big-endian microseconds  |
+//
+
 package psgserial
 
 import (
@@ -52,12 +141,12 @@ func (c Command) String() string {
 type Flags byte
 
 const (
-	FlagResponse Flags = 0x80
-	FlagError    Flags = 0x40
+	FlagsResponse Flags = 0x80
+	FlagsError    Flags = 0x40
 )
 
-func (f Flags) IsResponse() bool { return f&FlagResponse != 0 }
-func (f Flags) IsError() bool    { return f&FlagError != 0 }
+func (f Flags) IsResponse() bool { return f&FlagsResponse != 0 }
+func (f Flags) IsError() bool    { return f&FlagsError != 0 }
 
 // All devices on the network will respond to this address.
 const BroadcastAddress Address = 0xFFFFFFFFFFFFFFFF

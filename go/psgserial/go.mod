@@ -1,4 +1,4 @@
-module github.com/OpenPSG/psgserial/go
+module github.com/OpenPSG/psgserial/go/psgserial
 
 go 1.22.0
 

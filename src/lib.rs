@@ -1,4 +1,4 @@
-//! OpenPSG Serial Format
+//! OpenPSG Serial Protocol
 //!
 //! The OpenPSG serial protocol consists of the following message structure:
 //!

@@ -1,4 +1,4 @@
-// Package psgserial implements the OpenPSG serial format.
+// Package psgserial implements the OpenPSG serial protocol.
 //
 // The OpenPSG serial protocol consists of the following message structure:
 //

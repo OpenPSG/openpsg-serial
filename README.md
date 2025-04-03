@@ -1,3 +1,3 @@
 # psgserial
 
-OpenPSG serial format.
+OpenPSG serial protocol.

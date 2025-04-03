@@ -3,7 +3,7 @@ package psgserial_test
 import (
 	"testing"
 
-	"github.com/OpenPSG/openpsg-serial/go/psgserial"
+	psgserial "github.com/OpenPSG/psgserial/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

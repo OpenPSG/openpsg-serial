@@ -1,3 +1,3 @@
-# openpsg-serial
+# psgserial
 
-OpenPSG single wire serial protocol
+OpenPSG serial format.

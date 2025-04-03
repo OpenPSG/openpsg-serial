@@ -88,16 +88,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "openpsg-serial"
-version = "0.2.3"
-dependencies = [
- "bitflags 2.9.0",
- "crc",
- "defmt",
- "heapless",
-]
-
-[[package]]
 name = "proc-macro-error-attr2"
 version = "2.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -126,6 +116,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a31971752e70b8b2686d7e46ec17fb38dad4051d94024c88df49b667caea9c84"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "psgserial"
+version = "0.3.0"
+dependencies = [
+ "bitflags 2.9.0",
+ "crc",
+ "defmt",
+ "heapless",
 ]
 
 [[package]]

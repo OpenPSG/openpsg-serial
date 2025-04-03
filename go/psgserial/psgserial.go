@@ -484,7 +484,7 @@ const (
 )
 
 // Start of device-specific registers
-const REGISTER_DEVICE_START uint16 = 0x0100
+const REGISTER_DEVICE_START uint16 = 0x1000
 
 type ReadPayload struct {
 	// The register address to read

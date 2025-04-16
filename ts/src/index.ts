@@ -217,7 +217,7 @@ export class Message {
     buffer.set(payloadBytes, offset);
     offset += payloadBytes.length;
 
-    const crc = crc16(buffer.subarray(0, offset));
+    const crc = crc16_modbus(buffer.subarray(0, offset));
     buffer[offset++] = (crc >> 8) & 0xff;
     buffer[offset++] = crc & 0xff;
 
@@ -228,7 +228,7 @@ export class Message {
     const raw = unescape(input);
     const dataLen = raw.length - 2;
     const receivedCrc = (raw[dataLen] << 8) | raw[dataLen + 1];
-    const calculatedCrc = crc16(raw.subarray(0, dataLen));
+    const calculatedCrc = crc16_modbus(raw.subarray(0, dataLen));
     if (receivedCrc !== calculatedCrc) throw new Error("CRC mismatch");
 
     const address = Address.fromBytes(raw.subarray(0, 8));
@@ -364,7 +364,7 @@ function unescape(input: Uint8Array): Uint8Array {
 }
 
 // Simple CRC-16 MODBUS implementation
-function crc16(data: Uint8Array): number {
+export function crc16_modbus(data: Uint8Array): number {
   let crc = 0xffff;
   for (let i = 0; i < data.length; i++) {
     crc ^= data[i];
@@ -373,5 +373,5 @@ function crc16(data: Uint8Array): number {
       else crc >>= 1;
     }
   }
-  return ((crc << 8) | (crc >> 8)) & 0xffff; // convert to big-endian
+  return crc & 0xffff;
 }

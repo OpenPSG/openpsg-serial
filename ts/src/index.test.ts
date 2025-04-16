@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   Address,
   Command,
+  crc16_modbus,
   ErrorCode,
   Flags,
   Message,
@@ -105,5 +106,17 @@ describe("OpenPSG Protocol", () => {
     encoded[encoded.length - 3] ^= 0xff; // Corrupt data before CRC
 
     expect(() => Message.decode(encoded)).toThrow("CRC mismatch");
+  });
+
+  it("should calculate checksums correctly", () => {
+    const data_str = "Hello, World!";
+    const data = new Uint8Array(data_str.length);
+    for (let i = 0; i < data_str.length; i++) {
+      data[i] = data_str.charCodeAt(i);
+    }
+
+    const sum = crc16_modbus(data);
+    const expected = 0x114E;
+    expect(sum).toBe(expected);
   });
 });
